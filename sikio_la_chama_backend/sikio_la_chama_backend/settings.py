@@ -188,6 +188,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:8081",
     "http://10.0.2.2:8000",
     "http://192.168.1.191:8000",
+    "sikio-la-chama-backend.onrender.com"
     # Add your frontend production URL
     # "https://yourfrontend.com",
 ]
