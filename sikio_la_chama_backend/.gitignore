@@ -1,0 +1,37 @@
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+
+# Virtual environments
+venv/
+env/
+
+# Django specific
+*.log
+db.sqlite3
+media/
+static/
+staticfiles/
+
+# Environment variables
+.env
+.env.*
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Build / packaging
+build/
+dist/
+.eggs/
+*.egg-info/
