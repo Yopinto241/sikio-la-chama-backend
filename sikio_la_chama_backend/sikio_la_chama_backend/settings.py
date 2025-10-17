@@ -6,6 +6,7 @@ from pathlib import Path
 from decouple import config
 import os
 import dj_database_url
+from urllib.parse import urlparse
 
 # -------------------------------
 # Base Directory
@@ -18,14 +19,39 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY', default='unsafe-secret-key')
 DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = config(
-    'ALLOWED_HOSTS',
-    # Include local dev hosts and the Render app hostname by default so the
-    # app will run without an explicit ALLOWED_HOSTS env var during deploy.
-    # For production, set ALLOWED_HOSTS in environment to a comma-separated list.
-    default='127.0.0.1,localhost,sikio-la-chama-backend.onrender.com',
-    cast=lambda v: [s.strip() for s in v.split(',')]
-)
+def _parse_host_list(value: str, strip_scheme: bool = True):
+    """Parse a comma-separated host/origin string into a list.
+
+    If strip_scheme is True the returned values will be hostnames (no scheme);
+    otherwise entries will include a scheme (defaulting to https if missing).
+    This makes ALLOWED_HOSTS tolerant to env vars that accidentally include
+    "http(s)://" prefixes while ensuring CSRF_TRUSTED_ORIGINS and
+    CORS_ALLOWED_ORIGINS include schemes as required.
+    """
+    out = []
+    if not value:
+        return out
+    for part in [p.strip() for p in value.split(',') if p.strip()]:
+        parsed = urlparse(part)
+        if strip_scheme:
+            # urlparse places hostname in netloc when a scheme is present; if
+            # not present the path contains the hostname. Normalize to hostname.
+            host = parsed.netloc or parsed.path
+            # Trim any trailing slashes or ports
+            host = host.rstrip('/').split(':')[0]
+            out.append(host)
+        else:
+            # Ensure scheme present; default to https if not provided
+            if parsed.scheme:
+                out.append(part.rstrip('/'))
+            else:
+                out.append('https://' + part.rstrip('/'))
+    return out
+
+
+# ALLOWED_HOSTS: read from env, tolerate values that include a scheme
+_raw_allowed = config('ALLOWED_HOSTS', default='127.0.0.1,localhost,sikio-la-chama-backend.onrender.com')
+ALLOWED_HOSTS = _parse_host_list(_raw_allowed, strip_scheme=True)
 
 # -------------------------------
 # Installed Applications
@@ -186,15 +212,22 @@ REST_FRAMEWORK = {
 # -------------------------------
 # CORS (for Flutter / web apps)
 # -------------------------------
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:8081",
-    "http://127.0.0.1:8081",
-    "http://10.0.2.2:8000",
-    "http://192.168.1.191:8000",
-    "sikio-la-chama-backend.onrender.com"
-    # Add your frontend production URL
-    # "https://yourfrontend.com",
-]
+_raw_cors = config(
+    'CORS_ALLOWED_ORIGINS',
+    default=','.join([
+        'http://localhost:8081',
+        'http://127.0.0.1:8081',
+        'http://10.0.2.2:8000',
+        'http://192.168.1.191:8000',
+        'https://sikio-la-chama-backend.onrender.com',
+    ])
+)
+# Ensure CORS origins include scheme
+CORS_ALLOWED_ORIGINS = _parse_host_list(_raw_cors, strip_scheme=False)
+
+# CSRF trusted origins: must include scheme
+_raw_csrf = config('CSRF_TRUSTED_ORIGINS', default='https://sikio-la-chama-backend.onrender.com')
+CSRF_TRUSTED_ORIGINS = _parse_host_list(_raw_csrf, strip_scheme=False)
 
 # -------------------------------
 # MapTiler API key
