@@ -13,11 +13,13 @@ django-filter==24.3
 djangorestframework==3.15.2
 djangorestframework_simplejwt==5.5.1
 drf-nested-routers==0.95.0
+gunicorn==23.0.0
 idna==3.11
 imageio==2.37.0
 imageio-ffmpeg==0.6.0
 moviepy==2.2.1
 numpy==2.3.3
+packaging==25.0
 pillow==10.4.0
 proglog==0.1.12
 psycopg==3.2.10
