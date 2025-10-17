@@ -20,7 +20,10 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = config(
     'ALLOWED_HOSTS',
-    default='127.0.0.1,localhost',
+    # Include local dev hosts and the Render app hostname by default so the
+    # app will run without an explicit ALLOWED_HOSTS env var during deploy.
+    # For production, set ALLOWED_HOSTS in environment to a comma-separated list.
+    default='127.0.0.1,localhost,sikio-la-chama-backend.onrender.com',
     cast=lambda v: [s.strip() for s in v.split(',')]
 )
 
