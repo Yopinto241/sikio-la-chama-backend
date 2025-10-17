@@ -7,6 +7,7 @@ from .models import Poll
 from .serializers import PollSerializer, PollListSerializer, VoteCreateSerializer
 from .permissions import IsPollAdmin
 from rest_framework.pagination import PageNumberPagination
+from asgiref.sync import sync_to_async
 
 class StandardPagination(PageNumberPagination):
     page_size = 20
@@ -29,13 +30,26 @@ class PollViewSet(viewsets.ModelViewSet):
         return PollSerializer
 
     @action(detail=True, methods=['post'], url_path='vote')
-    def vote(self, request, pk=None):
-        poll = get_object_or_404(Poll, pk=pk)
-        serializer = VoteCreateSerializer(data=request.data, context={'poll': poll})
-        serializer.is_valid(raise_exception=True)
+    async def vote(self, request, pk=None):
+        # Run ORM and serializer operations in a thread to avoid calling
+        # synchronous DB code from an async context.
         try:
-            vote = serializer.create_vote(request)
+            poll = await sync_to_async(get_object_or_404, thread_sensitive=True)(Poll, pk=pk)
+            # serializer creation is synchronous but cheap; validation and
+            # create_vote may touch the DB so wrap those calls.
+            serializer = VoteCreateSerializer(data=request.data, context={'poll': poll})
+            await sync_to_async(serializer.is_valid, thread_sensitive=True)(raise_exception=True)
+            try:
+                vote = await sync_to_async(serializer.create_vote, thread_sensitive=True)(request)
+            except Exception as e:
+                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Serializing the updated poll may access related objects; run in thread.
+            def _serialize_poll():
+                return PollListSerializer(poll, context={'request': request}).data
+
+            poll_ser_data = await sync_to_async(_serialize_poll, thread_sensitive=True)()
+            return Response({'detail': 'Vote recorded', 'poll': poll_ser_data}, status=status.HTTP_201_CREATED)
         except Exception as e:
+            # surface a helpful error if async/DB boundaries are still violated
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        poll_ser = PollListSerializer(poll, context={'request': request})
-        return Response({'detail': 'Vote recorded', 'poll': poll_ser.data}, status=status.HTTP_201_CREATED)
