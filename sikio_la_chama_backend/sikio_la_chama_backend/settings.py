@@ -146,9 +146,15 @@ WSGI_APPLICATION = 'sikio_la_chama_backend.wsgi.application'
 # Database (PostgreSQL on Render)
 # -------------------------------
 DATABASES = {
-    'default': dj_database_url.config(
-        default=config('DATABASE_URL')
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'sikio_la_chama_db',
+        'USER': 'sikio_user',
+        'PASSWORD': os.environ.get('DB_PASSWORD'),
+        'HOST': 'dpg-d3pn1j49c44c73c68qtg-a.oregon-postgres.render.com',
+        'PORT': '5432',
+    }
+
 }
 
 # -------------------------------
