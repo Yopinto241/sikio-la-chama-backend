@@ -11,6 +11,8 @@ from .serializers import FeedShareSerializer
 from .models import FeedShare
 import cloudinary.uploader
 from django.conf import settings
+import tempfile
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -37,41 +39,34 @@ class FeedCreateView(APIView):
             # If there's a video file in the request, attempt a direct upload via Cloudinary
             video_file = request.FILES.get('video')
             if video_file:
+                tmp_path = None
                 try:
-                    logger.debug("Attempting direct Cloudinary upload for video file")
+                    logger.debug("Preparing temporary file for Cloudinary upload")
+                    # Write the uploaded file to a temporary file so Cloudinary
+                    # receives a fresh file stream (prevents Empty file errors).
+                    suffix = os.path.splitext(getattr(video_file, 'name', ''))[1] or '.mp4'
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                    try:
+                        for chunk in video_file.chunks():
+                            tmp.write(chunk)
+                        tmp.flush()
+                    finally:
+                        tmp.close()
+                    tmp_path = tmp.name
+
+                    v_size = os.path.getsize(tmp_path) if tmp_path and os.path.exists(tmp_path) else None
+                    v_name = getattr(video_file, 'name', None)
+                    logger.debug("Video temp file written: %s (original name=%s size=%s)", tmp_path, v_name, v_size)
+
                     upload_opts = {
                         'resource_type': 'video',
                         'folder': getattr(settings, 'CLOUDINARY_VIDEO_FOLDER', 'feeds/videos/'),
                     }
 
-                    # Inspect incoming file for debugging
-                    try:
-                        v_size = getattr(video_file, 'size', None)
-                        v_name = getattr(video_file, 'name', None)
-                    except Exception:
-                        v_size = None
-                        v_name = None
-                    logger.debug("Video file info: name=%s size=%s type=%s", v_name, v_size, type(video_file))
+                    # Use upload_large for filesystem paths (reliable for big files)
+                    logger.debug("Uploading temp file to Cloudinary via upload_large: %s", tmp_path)
+                    result = cloudinary.uploader.upload_large(tmp_path, **upload_opts)
 
-                    result = None
-                    # Try a normal upload for smaller files first, then fallback to upload_large
-                    try:
-                        if v_size is not None and v_size <= 10 * 1024 * 1024:
-                            logger.debug("Using cloudinary.uploader.upload for small video")
-                            result = cloudinary.uploader.upload(video_file, resource_type='video', folder=upload_opts['folder'])
-                        else:
-                            logger.debug("Using cloudinary.uploader.upload_large for large video or unknown size")
-                            result = cloudinary.uploader.upload_large(video_file, **upload_opts)
-                    except Exception as up_ex:
-                        logger.exception("Primary Cloudinary upload attempt failed; retrying with upload_large")
-                        # Try upload_large as a retry path
-                        try:
-                            result = cloudinary.uploader.upload_large(video_file, **upload_opts)
-                        except Exception as up_ex2:
-                            logger.exception("Retry Cloudinary upload_large also failed")
-                            raise up_ex2
-
-                    # Validate result before accessing .get()
                     if not result or not isinstance(result, dict):
                         logger.error("Cloudinary returned empty or invalid response for video upload: %r", result)
                         raise RuntimeError("Empty or invalid response from Cloudinary")
@@ -82,7 +77,6 @@ class FeedCreateView(APIView):
                         logger.error("Cloudinary response missing URL: %r", result)
                         raise RuntimeError("Cloudinary response missing upload URL")
 
-                    # Create Feed using the returned video URL
                     feed = Feed.objects.create(
                         posted_by=request.user,
                         institution=serializer.validated_data.get('institution'),
@@ -94,8 +88,14 @@ class FeedCreateView(APIView):
                     return Response(FeedSerializer(feed).data, status=status.HTTP_201_CREATED)
                 except Exception as e2:
                     logger.exception("Direct Cloudinary video upload failed — returning error to client")
-                    # Return a clearer error to the client and include short details for debugging
                     return Response({"errors": {"video": "Cloudinary video upload failed", "details": str(e2)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                finally:
+                    try:
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                            logger.debug("Removed temporary file %s", tmp_path)
+                    except Exception:
+                        logger.exception("Failed to remove temporary upload file %s", tmp_path)
 
             # No video fallback available — return original error
             return Response({"errors": {"server": str(e)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
