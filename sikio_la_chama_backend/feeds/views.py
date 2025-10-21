@@ -9,6 +9,8 @@ from .serializers import FeedSerializer, FeedReactionSerializer
 from users.models import User
 from .serializers import FeedShareSerializer
 from .models import FeedShare
+import cloudinary.uploader
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +21,50 @@ class FeedCreateView(APIView):
     def post(self, request):
         logger.debug(f"User {request.user} creating feed with data: {request.data}")
         serializer = FeedSerializer(data=request.data)
-        if serializer.is_valid():
+        if not serializer.is_valid():
+            logger.error(f"Feed creation failed validation: {serializer.errors}")
+            return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Try normal save first (this uses the model storage configured)
+        try:
             feed = serializer.save(posted_by=request.user)
             logger.info(f"Feed {feed.id} created by {request.user.username}")
             return Response(FeedSerializer(feed).data, status=status.HTTP_201_CREATED)
-        logger.error(f"Feed creation failed: {serializer.errors}")
-        return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            # Log the exception with traceback to capture cloudinary_storage errors
+            logger.exception("Feed.save() failed — attempting Cloudinary fallback if video present")
+
+            # If there's a video file in the request, attempt a direct upload via Cloudinary
+            video_file = request.FILES.get('video')
+            if video_file:
+                try:
+                    logger.debug("Attempting direct Cloudinary upload for video file via upload_large")
+                    # Use upload_large for potentially big files and specify resource_type=video
+                    upload_opts = {
+                        'resource_type': 'video',
+                        'folder': getattr(settings, 'CLOUDINARY_VIDEO_FOLDER', 'feeds/videos/'),
+                    }
+                    # If your account requires chunking or unsigned uploads, adjust options accordingly
+                    result = cloudinary.uploader.upload_large(video_file, **upload_opts)
+                    logger.info("Cloudinary upload_large result: %s", result)
+
+                    # Build a Feed instance using the returned secure_url for the video
+                    video_url = result.get('secure_url') or result.get('url')
+                    feed = Feed.objects.create(
+                        posted_by=request.user,
+                        institution=serializer.validated_data.get('institution'),
+                        description=serializer.validated_data.get('description'),
+                        link=serializer.validated_data.get('link'),
+                        video=video_url,
+                    )
+                    logger.info(f"Feed {feed.id} created with video uploaded directly to Cloudinary by {request.user.username}")
+                    return Response(FeedSerializer(feed).data, status=status.HTTP_201_CREATED)
+                except Exception as e2:
+                    logger.exception("Direct Cloudinary video upload failed")
+                    return Response({"errors": {"video": "Cloudinary video upload failed", "details": str(e2)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # No video fallback available — return original error
+            return Response({"errors": {"server": str(e)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class FeedListView(APIView):
     permission_classes = [AllowAny]
