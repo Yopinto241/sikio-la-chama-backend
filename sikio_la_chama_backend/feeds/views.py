@@ -38,18 +38,51 @@ class FeedCreateView(APIView):
             video_file = request.FILES.get('video')
             if video_file:
                 try:
-                    logger.debug("Attempting direct Cloudinary upload for video file via upload_large")
-                    # Use upload_large for potentially big files and specify resource_type=video
+                    logger.debug("Attempting direct Cloudinary upload for video file")
                     upload_opts = {
                         'resource_type': 'video',
                         'folder': getattr(settings, 'CLOUDINARY_VIDEO_FOLDER', 'feeds/videos/'),
                     }
-                    # If your account requires chunking or unsigned uploads, adjust options accordingly
-                    result = cloudinary.uploader.upload_large(video_file, **upload_opts)
-                    logger.info("Cloudinary upload_large result: %s", result)
 
-                    # Build a Feed instance using the returned secure_url for the video
+                    # Inspect incoming file for debugging
+                    try:
+                        v_size = getattr(video_file, 'size', None)
+                        v_name = getattr(video_file, 'name', None)
+                    except Exception:
+                        v_size = None
+                        v_name = None
+                    logger.debug("Video file info: name=%s size=%s type=%s", v_name, v_size, type(video_file))
+
+                    result = None
+                    # Try a normal upload for smaller files first, then fallback to upload_large
+                    try:
+                        if v_size is not None and v_size <= 10 * 1024 * 1024:
+                            logger.debug("Using cloudinary.uploader.upload for small video")
+                            result = cloudinary.uploader.upload(video_file, resource_type='video', folder=upload_opts['folder'])
+                        else:
+                            logger.debug("Using cloudinary.uploader.upload_large for large video or unknown size")
+                            result = cloudinary.uploader.upload_large(video_file, **upload_opts)
+                    except Exception as up_ex:
+                        logger.exception("Primary Cloudinary upload attempt failed; retrying with upload_large")
+                        # Try upload_large as a retry path
+                        try:
+                            result = cloudinary.uploader.upload_large(video_file, **upload_opts)
+                        except Exception as up_ex2:
+                            logger.exception("Retry Cloudinary upload_large also failed")
+                            raise up_ex2
+
+                    # Validate result before accessing .get()
+                    if not result or not isinstance(result, dict):
+                        logger.error("Cloudinary returned empty or invalid response for video upload: %r", result)
+                        raise RuntimeError("Empty or invalid response from Cloudinary")
+
+                    logger.info("Cloudinary upload result keys: %s", list(result.keys()))
                     video_url = result.get('secure_url') or result.get('url')
+                    if not video_url:
+                        logger.error("Cloudinary response missing URL: %r", result)
+                        raise RuntimeError("Cloudinary response missing upload URL")
+
+                    # Create Feed using the returned video URL
                     feed = Feed.objects.create(
                         posted_by=request.user,
                         institution=serializer.validated_data.get('institution'),
@@ -60,7 +93,8 @@ class FeedCreateView(APIView):
                     logger.info(f"Feed {feed.id} created with video uploaded directly to Cloudinary by {request.user.username}")
                     return Response(FeedSerializer(feed).data, status=status.HTTP_201_CREATED)
                 except Exception as e2:
-                    logger.exception("Direct Cloudinary video upload failed")
+                    logger.exception("Direct Cloudinary video upload failed — returning error to client")
+                    # Return a clearer error to the client and include short details for debugging
                     return Response({"errors": {"video": "Cloudinary video upload failed", "details": str(e2)}}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             # No video fallback available — return original error
