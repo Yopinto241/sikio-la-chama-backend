@@ -20,6 +20,7 @@ def root_view(request):
             "announcements": "/api/announcements/",
             "ilani": "/api/ilani/",
             "feeds": "/api/feeds/",
+            "notifications": "/api/notifications/",
         }
     })
 
@@ -43,6 +44,7 @@ urlpatterns = [
     path('api/announcements/', include('announcements.urls')),
     path('api/ilani/', include('ilani.urls')),
     path('api/feeds/', include('feeds.urls')),
+    path('api/notifications/', include('notifications.urls')),
 ]
 
 # Media files during development

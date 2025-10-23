@@ -19,6 +19,7 @@ staticfiles/
 # Environment variables
 .env
 .env.*
+firebase-service-account.json
 
 # IDE & OS files
 .vscode/

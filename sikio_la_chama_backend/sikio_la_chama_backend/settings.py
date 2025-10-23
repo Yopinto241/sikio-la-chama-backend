@@ -86,6 +86,7 @@ INSTALLED_APPS = [
     'problem_types.apps.ProblemTypesConfig',
     'announcements.apps.AnnouncementsConfig',
     'ilani.apps.IlaniConfig',
+    'notifications.apps.NotificationsConfig',
 ]
 
 # -------------------------------
@@ -99,6 +100,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'notifications.middleware.PushDeviceAutoRegisterMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -253,3 +255,15 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 # Custom user model
 # -------------------------------
 AUTH_USER_MODEL = 'users.User'
+
+# -------------------------------
+# Push notifications (FCM)
+# -------------------------------
+# Set FCM server key in env as FCM_SERVER_KEY to enable push delivery
+FCM_SERVER_KEY = config('FCM_SERVER_KEY', default=None)
+# FCM v1: service account credentials (prefer this). You can set either
+# FIREBASE_CREDENTIALS_JSON (full JSON content) or FIREBASE_CREDENTIALS_FILE (path).
+FIREBASE_CREDENTIALS_JSON = config('FIREBASE_CREDENTIALS_JSON', default=None)
+FIREBASE_CREDENTIALS_FILE = config('FIREBASE_CREDENTIALS_FILE', default=str(BASE_DIR / 'firebase-service-account.json'))
+# Payload mode: when True, send data-only pushes to avoid OS banner + app banner duplication.
+NOTIFICATIONS_DATA_ONLY = config('NOTIFICATIONS_DATA_ONLY', default=False, cast=bool)
